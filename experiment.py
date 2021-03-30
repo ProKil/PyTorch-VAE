@@ -30,7 +30,7 @@ class VAEXperiment(pl.LightningModule):
     def forward(self, input: Tensor, **kwargs) -> Tensor:
         return self.model(input, **kwargs)
 
-    def training_step(self, batch, batch_idx, optimizer_idx = 0):
+    def training_step(self, batch, batch_idx, optimizer_idx = 0, no_log=False):
         real_img, labels = batch
         self.curr_device = real_img.device
 
@@ -40,7 +40,8 @@ class VAEXperiment(pl.LightningModule):
                                               optimizer_idx=optimizer_idx,
                                               batch_idx = batch_idx)
 
-        self.logger.experiment.log({key: val.item() for key, val in train_loss.items()})
+        if not no_log:
+            self.logger.experiment.log({key: val.item() for key, val in train_loss.items()})
 
         return train_loss
 
@@ -140,7 +141,7 @@ class VAEXperiment(pl.LightningModule):
             dataset = CelebA(root = self.params['data_path'],
                              split = "train",
                              transform=transform,
-                             download=False)
+                             download=True) # if seeing not-a-zip-file error, download the corresponding zip file from the source google drive
         else:
             raise ValueError('Undefined dataset type')
 
@@ -158,7 +159,7 @@ class VAEXperiment(pl.LightningModule):
             self.sample_dataloader =  DataLoader(CelebA(root = self.params['data_path'],
                                                         split = "test",
                                                         transform=transform,
-                                                        download=False),
+                                                        download=True),
                                                  batch_size= 144,
                                                  shuffle = True,
                                                  drop_last=True)
