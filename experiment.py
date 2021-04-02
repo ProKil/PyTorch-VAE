@@ -199,6 +199,24 @@ class VAEXperiment(pl.LightningModule):
                           drop_last=False)
         self.num_test_imgs = len(dataset)
         return test_dataloader
+    
+    @data_loader
+    def train_sequential_dataloader(self):
+        transform = self.data_transforms()
+
+        if self.params['dataset'] == 'celeba':
+            dataset = CelebA(root = self.params['data_path'],
+                             split = "train",
+                             transform=transform,
+                             download=True) # if seeing not-a-zip-file error, download the corresponding zip file from the source google drive
+        else:
+            raise ValueError('Undefined dataset type')
+
+        self.num_train_imgs = len(dataset)
+        return DataLoader(dataset,
+                          batch_size= self.params['batch_size'],
+                          shuffle = False,
+                          drop_last=False)
 
     def data_transforms(self):
 

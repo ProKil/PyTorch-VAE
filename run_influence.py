@@ -16,6 +16,7 @@ import torch.autograd as autograd
 from tqdm import tqdm, trange
 from collections import defaultdict
 import pdb
+import pickle
 
 
 def gather_flat_grad(grads):
@@ -56,6 +57,10 @@ parser.add_argument("--influence_metric",
                     default="",
                     type=str,
                     help="standard dot product metric or theta-relative")
+parser.add_argument("--output_dir",
+                    default='',
+                    type=str,
+                    help="the output directory where the interpretations will be written.")
 
 args = parser.parse_args()
 with open(args.filename, 'r') as file:
@@ -84,6 +89,8 @@ experiment = VAEXperiment(model,
 
 # Han: above mostly unchanged, now substituting the trainer with influence analysis
 
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
 # currently not working for model loading because of some issues over pytorch_lightning's version?
 if args.model_ckpt_dir:
     checkpoints = list(sorted(glob.glob(os.path.join(args.model_ckpt_dir, "*.ckpt"), recursive=True)))
@@ -91,6 +98,8 @@ if args.model_ckpt_dir:
 #     model.load_state_dict(trained_ckpt['state_dict'])
     trained_ckpt = torch.load(checkpoints[-1])
     experiment.load_state_dict(trained_ckpt['state_dict'])
+    
+model.to(device)
 
 print('++++++++++ number of params +++++++++', sum(p.numel() for n, p in model.named_parameters()))
 
@@ -105,14 +114,14 @@ for n, p in list(model.named_parameters()):
         p.requires_grad = False
 
 # dataloaders
-train_dataloader = experiment.train_dataloader() # note that currently shuffle=True, also need to set batch_size=1
+train_dataloader = experiment.train_sequential_dataloader()
 test_dataloader = experiment.test_dataloader()[0]
 
 agg_influence_dict = defaultdict(list)
 ihvp_dict = dict()
 
 # L_TEST
-for test_idx, test_batch in enumerate(tqdm(test_dataloader, desc="Test set index")): # somehow need to squeeze the test dataloader
+for test_idx, test_batch in enumerate(tqdm(test_dataloader, desc="Test set index")):
     assert len(test_batch[0]) == 1 # check whether only one image is passed in
     
     if args.start_test_idx != -1 and args.end_test_idx != -1:
@@ -129,13 +138,13 @@ for test_idx, test_batch in enumerate(tqdm(test_dataloader, desc="Test set index
     ######## L_TEST GRADIENT ########
     model.eval()
     model.zero_grad()
-    test_loss = experiment.testing_step(test_batch, batch_idx=test_idx)
+    test_loss = experiment.testing_step((b.to(device) for b in test_batch), batch_idx=test_idx)
     test_grads = autograd.grad(test_loss['loss'], param_influence)
     ################
 
     ihvp_dict[test_idx] = gather_flat_grad(test_grads).detach().cpu() # put to CPU to save GPU memory
 
-ihvp_stack = torch.stack([ihvp_dict[tmp_idx] for tmp_idx in sorted(ihvp_dict.keys())], dim=0).to(experiment.curr_device)
+ihvp_stack = torch.stack([ihvp_dict[tmp_idx] for tmp_idx in sorted(ihvp_dict.keys())], dim=0).to(device)
 ihvp_dict_keys = sorted(ihvp_dict.keys())
 del ihvp_dict
 influence_list = []
@@ -144,13 +153,13 @@ influence_list = []
 for train_idx, train_batch in enumerate(tqdm(train_dataloader, desc="Train set index")):
     assert len(train_batch[0]) == 1 # check whether only one image is passed in
     
-    if train_idx >= 500: # just checking a few examples for now due to speed
-        break
+#     if train_idx >= 500: # just checking a few examples for now due to speed
+#         break
     
     ######## L_TRAIN GRADIENT ########
     model.eval()
     model.zero_grad()
-    train_loss = experiment.training_step(train_batch, batch_idx=train_idx, no_log=True)
+    train_loss = experiment.training_step((b.to(device) for b in train_batch), batch_idx=train_idx, no_log=True)
     train_grads = autograd.grad(train_loss['loss'], param_influence)
     ################
 
@@ -172,7 +181,10 @@ for train_i, train_i_inf in enumerate(influence_list):
         agg_influence_dict[test_idx][-1][train_i] = train_i_inf_on_test_j.item()
 del influence_list
 
-# information stored in agg_influence_dict
-print(agg_influence_dict.keys())
+# saving results
+if os.path.exists(args.output_dir) and os.listdir(args.output_dir):
+    logger.info("WARNING: Output directory already exists and is not empty.")
+if not os.path.exists(args.output_dir):
+    os.makedirs(args.output_dir)
 
-pdb.set_trace()
+pickle.dump(agg_influence_dict, open(os.path.join(args.output_dir, 'agg_influence_dict.pkl'), "wb"))
