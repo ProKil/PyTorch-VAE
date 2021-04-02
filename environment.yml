@@ -1,4 +1,4 @@
-name: PyTorch-VAE
+name: cmu_vae2
 channels:
   - defaults
 dependencies:

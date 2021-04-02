@@ -56,6 +56,18 @@ class VAEXperiment(pl.LightningModule):
                                             batch_idx = batch_idx)
 
         return val_loss
+    
+    def testing_step(self, batch, batch_idx, optimizer_idx = 0): # added for interpretation
+        real_img, labels = batch
+        self.curr_device = real_img.device
+
+        results = self.forward(real_img, labels = labels)
+        val_loss = self.model.loss_function(*results,
+                                            M_N = self.params['batch_size']/ self.num_test_imgs,
+                                            optimizer_idx = optimizer_idx,
+                                            batch_idx = batch_idx)
+
+        return val_loss
 
     def validation_end(self, outputs):
         avg_loss = torch.stack([x['loss'] for x in outputs]).mean()
@@ -168,6 +180,25 @@ class VAEXperiment(pl.LightningModule):
             raise ValueError('Undefined dataset type')
 
         return self.sample_dataloader
+    
+    @data_loader
+    def test_dataloader(self): # added to compute L_test
+        transform = self.data_transforms()
+
+        if self.params['dataset'] == 'celeba':
+            dataset = CelebA(root = self.params['data_path'],
+                             split = "test",
+                             transform=transform,
+                             download=True) # if seeing not-a-zip-file error, download the corresponding zip file from the source google drive
+        else:
+            raise ValueError('Undefined dataset type')
+
+        test_dataloader = DataLoader(dataset,
+                          batch_size= self.params['batch_size'],
+                          shuffle = False,
+                          drop_last=False)
+        self.num_test_imgs = len(dataset)
+        return test_dataloader
 
     def data_transforms(self):
 
@@ -183,4 +214,3 @@ class VAEXperiment(pl.LightningModule):
         else:
             raise ValueError('Undefined dataset type')
         return transform
-

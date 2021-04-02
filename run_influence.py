@@ -87,10 +87,10 @@ experiment = VAEXperiment(model,
 # currently not working for model loading because of some issues over pytorch_lightning's version?
 if args.model_ckpt_dir:
     checkpoints = list(sorted(glob.glob(os.path.join(args.model_ckpt_dir, "*.ckpt"), recursive=True)))
-    trained_ckpt_file = checkpoints[-1]
 #     trained_ckpt = pl_load(trained_ckpt_file, map_location=lambda storage, loc: storage)
 #     model.load_state_dict(trained_ckpt['state_dict'])
-    model = pl.LightningModule.load_from_checkpoint(trained_ckpt_file)
+    trained_ckpt = torch.load(checkpoints[-1])
+    experiment.load_state_dict(trained_ckpt['state_dict'])
 
 print('++++++++++ number of params +++++++++', sum(p.numel() for n, p in model.named_parameters()))
 
@@ -106,13 +106,15 @@ for n, p in list(model.named_parameters()):
 
 # dataloaders
 train_dataloader = experiment.train_dataloader() # note that currently shuffle=True, also need to set batch_size=1
-test_dataloader = experiment.val_dataloader()
+test_dataloader = experiment.test_dataloader()[0]
 
 agg_influence_dict = defaultdict(list)
 ihvp_dict = dict()
 
 # L_TEST
-for test_idx, test_batch in enumerate(test_dataloader[0]): # somehow need to squeeze the test dataloader
+for test_idx, test_batch in enumerate(tqdm(test_dataloader, desc="Test set index")): # somehow need to squeeze the test dataloader
+    assert len(test_batch[0]) == 1 # check whether only one image is passed in
+    
     if args.start_test_idx != -1 and args.end_test_idx != -1:
         if test_idx < args.start_test_idx:
             continue
@@ -127,7 +129,7 @@ for test_idx, test_batch in enumerate(test_dataloader[0]): # somehow need to squ
     ######## L_TEST GRADIENT ########
     model.eval()
     model.zero_grad()
-    test_loss = experiment.validation_step(test_batch, batch_idx=test_idx)
+    test_loss = experiment.testing_step(test_batch, batch_idx=test_idx)
     test_grads = autograd.grad(test_loss['loss'], param_influence)
     ################
 
@@ -140,7 +142,9 @@ influence_list = []
 
 # L_TRAIN
 for train_idx, train_batch in enumerate(tqdm(train_dataloader, desc="Train set index")):
-    if train_idx >= 100: # just checking a few examples for now due to speed
+    assert len(train_batch[0]) == 1 # check whether only one image is passed in
+    
+    if train_idx >= 500: # just checking a few examples for now due to speed
         break
     
     ######## L_TRAIN GRADIENT ########
@@ -155,8 +159,10 @@ for train_idx, train_batch in enumerate(tqdm(train_dataloader, desc="Train set i
             influence_list.append(torch.nn.functional.cosine_similarity(ihvp_stack,
                                                                         torch.unsqueeze(gather_flat_grad(train_grads), 0),
                                                                         dim=1, eps=1e-12).detach().cpu())
-        else:
+        elif args.influence_metric == "dotprod":
             influence_list.append(torch.matmul(ihvp_stack, gather_flat_grad(train_grads)).detach().cpu())
+        else:
+            raise ValueError("specified influence metric does not exist")
             
 # wrap up the influence scores
 for test_idx in ihvp_dict_keys:

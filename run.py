@@ -8,6 +8,10 @@ import torch.backends.cudnn as cudnn
 from pytorch_lightning import Trainer
 from pytorch_lightning.logging import TestTubeLogger
 
+class DummyDict(object):
+    def __init__(self, hparams):
+        for k, v in hparams.items():
+            self.k = v
 
 parser = argparse.ArgumentParser(description='Generic runner for VAE models')
 parser.add_argument('--config',  '-c',
@@ -40,6 +44,8 @@ cudnn.benchmark = False
 model = vae_models[config['model_params']['name']](**config['model_params'])
 experiment = VAEXperiment(model,
                           config['exp_params'])
+
+experiment.hparams = DummyDict(config['model_params']) # added to make PL save hparams
 
 runner = Trainer(default_save_path=f"{tt_logger.save_dir}",
                  min_nb_epochs=1,
