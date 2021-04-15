@@ -1,0 +1,3 @@
+[submodule "Sentence-VAE"]
+	path = Sentence-VAE
+	url = git@github.com:ProKil/Sentence-VAE.git
